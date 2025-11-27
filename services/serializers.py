@@ -32,6 +32,8 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
     category = ServiceCategorySerializer(read_only=True)
     distance_km = serializers.SerializerMethodField()
     activities = RequestActivitySerializer(read_only=True, many=True)
+    worker_location = serializers.SerializerMethodField()
+    worker_distance_km = serializers.SerializerMethodField()
 
     class Meta:
         model = ServiceRequest
@@ -59,6 +61,8 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
             "updated_at",
             "distance_km",
             "activities",
+            "worker_location",
+            "worker_distance_km",
         )
         read_only_fields = (
             "reference_code",
@@ -72,6 +76,8 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
             "updated_at",
             "distance_km",
             "activities",
+            "worker_location",
+            "worker_distance_km",
         )
 
     def get_distance_km(self, obj: ServiceRequest) -> float | None:
@@ -80,6 +86,36 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
         if distance is None:
             return None
         return round(distance, 2)
+
+    def get_worker_location(self, obj: ServiceRequest) -> dict | None:
+        """Get worker's current location if worker is assigned and has location."""
+        if not obj.worker or not hasattr(obj.worker, 'worker_profile'):
+            return None
+        profile = obj.worker.worker_profile
+        if profile.current_latitude is None or profile.current_longitude is None:
+            return None
+        return {
+            "latitude": float(profile.current_latitude),
+            "longitude": float(profile.current_longitude),
+            "last_updated": profile.last_available_at.isoformat() if profile.last_available_at else None,
+        }
+
+    def get_worker_distance_km(self, obj: ServiceRequest) -> float | None:
+        """Calculate distance from worker's current location to request location."""
+        worker_location = self.get_worker_location(obj)
+        if not worker_location:
+            return None
+        from .utils import haversine_km
+        try:
+            distance = haversine_km(
+                worker_location["latitude"],
+                worker_location["longitude"],
+                float(obj.location_latitude),
+                float(obj.location_longitude),
+            )
+            return round(distance, 2)
+        except (ValueError, TypeError):
+            return None
 
 
 class ServiceRequestCreateSerializer(serializers.ModelSerializer):

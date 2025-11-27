@@ -94,6 +94,46 @@ class ServiceRequestViewSet(
         serializer = ServiceRequestSerializer(queryset, many=True, context={"request": request})
         return Response(serializer.data)
 
+    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated, IsWorker])
+    def completed(self, request):
+        """Get completed jobs for the worker."""
+        queryset = ServiceRequest.objects.filter(
+            worker=request.user,
+            status=ServiceRequest.Status.COMPLETED,
+        ).select_related("customer", "category").order_by("-completed_at")
+        serializer = ServiceRequestSerializer(queryset, many=True, context={"request": request})
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated, IsCustomer])
+    def my_active(self, request):
+        """Get active requests for the customer."""
+        queryset = ServiceRequest.objects.filter(
+            customer=request.user,
+            status__in=[ServiceRequest.Status.PENDING, ServiceRequest.Status.ACCEPTED, ServiceRequest.Status.IN_PROGRESS],
+        ).select_related("worker", "category").order_by("-created_at")
+        serializer = ServiceRequestSerializer(queryset, many=True, context={"request": request})
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated, IsCustomer])
+    def my_completed(self, request):
+        """Get completed requests for the customer."""
+        queryset = ServiceRequest.objects.filter(
+            customer=request.user,
+            status=ServiceRequest.Status.COMPLETED,
+        ).select_related("worker", "category").order_by("-completed_at")
+        serializer = ServiceRequestSerializer(queryset, many=True, context={"request": request})
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated, IsCustomer])
+    def my_pending(self, request):
+        """Get pending requests for the customer."""
+        queryset = ServiceRequest.objects.filter(
+            customer=request.user,
+            status=ServiceRequest.Status.PENDING,
+        ).select_related("category").order_by("-created_at")
+        serializer = ServiceRequestSerializer(queryset, many=True, context={"request": request})
+        return Response(serializer.data)
+
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated, IsWorker])
     def accept(self, request, pk=None):
         service_request = ServiceRequest.objects.select_related("customer", "category").get(pk=pk)
@@ -122,6 +162,118 @@ class ServiceRequestViewSet(
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         response_serializer = ServiceRequestSerializer(service_request, context={"request": request})
         return Response(response_serializer.data)
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated, IsWorker])
+    def update_location(self, request, pk=None):
+        """Update worker's location and status (on the way, arrived) for an accepted job."""
+        service_request = self.get_object()
+        if service_request.worker != request.user:
+            return Response({"detail": "You are not assigned to this request."}, status=status.HTTP_403_FORBIDDEN)
+        
+        if service_request.status not in [ServiceRequest.Status.ACCEPTED, ServiceRequest.Status.IN_PROGRESS]:
+            return Response(
+                {"detail": "Location can only be updated for accepted or in-progress requests."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        latitude = request.data.get("latitude")
+        longitude = request.data.get("longitude")
+        status_update = request.data.get("status")  # "on_the_way" or "arrived"
+        
+        if not latitude or not longitude:
+            return Response(
+                {"detail": "Latitude and longitude are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            latitude = float(latitude)
+            longitude = float(longitude)
+        except (ValueError, TypeError):
+            return Response(
+                {"detail": "Invalid latitude or longitude values."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Update worker profile location
+        profile = getattr(request.user, "worker_profile", None)
+        if profile:
+            profile.current_latitude = latitude
+            profile.current_longitude = longitude
+            profile.last_available_at = timezone.now()
+            profile.save(update_fields=["current_latitude", "current_longitude", "last_available_at"])
+        
+        # Update request status if worker has arrived
+        if status_update == "arrived" and service_request.status == ServiceRequest.Status.ACCEPTED:
+            service_request.mark_in_progress()
+            from .models import RequestActivity
+            RequestActivity.objects.create(
+                service_request=service_request,
+                actor=request.user,
+                message=f"Worker {request.user.email} has arrived at the location.",
+            )
+        
+        # Create activity log
+        from .models import RequestActivity
+        status_message = "arrived at location" if status_update == "arrived" else "is on the way"
+        RequestActivity.objects.create(
+            service_request=service_request,
+            actor=request.user,
+            message=f"Worker {request.user.email} {status_message}. Location updated.",
+        )
+        
+        response_serializer = ServiceRequestSerializer(service_request, context={"request": request})
+        return Response(response_serializer.data)
+
+    @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated])
+    def track_worker(self, request, pk=None):
+        """Get worker location and tracking info for a customer's request."""
+        service_request = self.get_object()
+        
+        # Only customer or assigned worker can track
+        if request.user.role == User.Role.CUSTOMER and service_request.customer != request.user:
+            return Response({"detail": "You can only track your own requests."}, status=status.HTTP_403_FORBIDDEN)
+        
+        if not service_request.worker:
+            return Response(
+                {"detail": "No worker assigned to this request yet."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        profile = getattr(service_request.worker, "worker_profile", None)
+        if not profile or profile.current_latitude is None or profile.current_longitude is None:
+            return Response(
+                {
+                    "worker": UserSerializer(service_request.worker, context={"request": request}).data,
+                    "location": None,
+                    "distance_km": None,
+                    "status": service_request.status,
+                }
+            )
+        
+        from .utils import haversine_km
+        distance = haversine_km(
+            float(profile.current_latitude),
+            float(profile.current_longitude),
+            float(service_request.location_latitude),
+            float(service_request.location_longitude),
+        )
+        
+        return Response({
+            "worker": UserSerializer(service_request.worker, context={"request": request}).data,
+            "location": {
+                "latitude": float(profile.current_latitude),
+                "longitude": float(profile.current_longitude),
+                "last_updated": profile.last_available_at.isoformat() if profile.last_available_at else None,
+            },
+            "distance_km": round(distance, 2),
+            "status": service_request.status,
+            "request_location": {
+                "latitude": float(service_request.location_latitude),
+                "longitude": float(service_request.location_longitude),
+                "address": service_request.address,
+            },
+        })
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated, IsWorker])
     def complete(self, request, pk=None):
@@ -156,6 +308,70 @@ class ServiceRequestViewSet(
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         response_serializer = ServiceRequestSerializer(service_request, context={"request": request})
         return Response(response_serializer.data)
+
+
+class NearbyJobsView(APIView):
+    """Get nearby jobs within worker's service radius."""
+    permission_classes = [permissions.IsAuthenticated, IsWorker]
+
+    def get(self, request):
+        lat = request.query_params.get("lat")
+        lng = request.query_params.get("lng")
+        
+        if not lat or not lng:
+            return Response(
+                {"detail": "Both 'lat' and 'lng' query parameters are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            worker_lat = float(lat)
+            worker_lng = float(lng)
+        except ValueError:
+            return Response(
+                {"detail": "Invalid latitude or longitude values."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        profile = getattr(request.user, "worker_profile", None)
+        if profile is None:
+            return Response(
+                {"detail": "Worker profile not found."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        max_distance = float(profile.service_radius_km)
+        queryset = ServiceRequest.objects.filter(status=ServiceRequest.Status.PENDING)
+        
+        distance_map: dict[int, float] = {}
+        filtered_ids: list[int] = []
+        
+        from .utils import haversine_km
+        
+        for request_obj in queryset:
+            distance = haversine_km(
+                worker_lat,
+                worker_lng,
+                float(request_obj.location_latitude),
+                float(request_obj.location_longitude),
+            )
+            if distance <= max_distance:
+                distance_map[request_obj.id] = distance
+                filtered_ids.append(request_obj.id)
+        
+        if not filtered_ids:
+            return Response([])
+        
+        filtered_queryset = ServiceRequest.objects.filter(
+            id__in=filtered_ids
+        ).select_related("customer", "category").order_by("created_at")
+        
+        context = {
+            "request": request,
+            "distance_map": distance_map,
+        }
+        serializer = ServiceRequestSerializer(filtered_queryset, many=True, context=context)
+        return Response(serializer.data)
 
 
 class DashboardMetricsView(APIView):

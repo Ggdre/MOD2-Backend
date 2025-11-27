@@ -7,6 +7,7 @@ from .views import (
     LoginView,
     RegisterView,
     WorkerAvailabilityView,
+    WorkerStatusView,
 )
 
 app_name = "accounts"
