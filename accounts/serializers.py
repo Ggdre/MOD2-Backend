@@ -11,11 +11,12 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import CustomerProfile, User, WorkerProfile
+from services.models import ServiceCategory
 
 
 class WorkerProfileSerializer(serializers.ModelSerializer):
     category_id = serializers.PrimaryKeyRelatedField(
-        queryset=None,  # Will be set in __init__
+        queryset=ServiceCategory.objects.filter(is_active=True),
         source="category",
         required=False,
         allow_null=True,
@@ -46,12 +47,6 @@ class WorkerProfileSerializer(serializers.ModelSerializer):
             "total_completed_jobs",
             "category_name",
         )
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Set queryset for category_id field
-        from services.models import ServiceCategory
-        self.fields["category_id"].queryset = ServiceCategory.objects.filter(is_active=True)
 
 
 class CustomerProfileSerializer(serializers.ModelSerializer):
@@ -86,7 +81,7 @@ class UserSerializer(serializers.ModelSerializer):
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
     category_id = serializers.PrimaryKeyRelatedField(
-        queryset=None,  # Will be set in __init__
+        queryset=ServiceCategory.objects.filter(is_active=True),
         required=False,
         allow_null=True,
         write_only=True,
@@ -108,12 +103,6 @@ class RegisterSerializer(serializers.ModelSerializer):
             "default_longitude",
             "category_id",
         )
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Set queryset for category_id field
-        from services.models import ServiceCategory
-        self.fields["category_id"].queryset = ServiceCategory.objects.filter(is_active=True)
 
     def validate_role(self, value: str) -> str:
         allowed_roles = {User.Role.CUSTOMER, User.Role.WORKER}
@@ -143,17 +132,11 @@ class WorkerAvailabilitySerializer(serializers.Serializer):
     service_radius_km = serializers.IntegerField(min_value=1, required=False)
     skills = serializers.CharField(required=False, allow_blank=True)
     category_id = serializers.PrimaryKeyRelatedField(
-        queryset=None,  # Will be set in __init__
+        queryset=ServiceCategory.objects.filter(is_active=True),
         source="category",
         required=False,
         allow_null=True,
     )
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Set queryset for category_id field
-        from services.models import ServiceCategory
-        self.fields["category_id"].queryset = ServiceCategory.objects.filter(is_active=True)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         if attrs.get("is_available"):
