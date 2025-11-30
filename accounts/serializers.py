@@ -14,10 +14,20 @@ from .models import CustomerProfile, User, WorkerProfile
 
 
 class WorkerProfileSerializer(serializers.ModelSerializer):
+    category_id = serializers.PrimaryKeyRelatedField(
+        queryset=None,  # Will be set in __init__
+        source="category",
+        required=False,
+        allow_null=True,
+    )
+    category_name = serializers.CharField(source="category.name", read_only=True)
+
     class Meta:
         model = WorkerProfile
         fields = (
             "id",
+            "category_id",
+            "category_name",
             "skills",
             "is_available",
             "service_radius_km",
@@ -34,7 +44,14 @@ class WorkerProfileSerializer(serializers.ModelSerializer):
             "last_available_at",
             "average_rating",
             "total_completed_jobs",
+            "category_name",
         )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Set queryset for category_id field
+        from services.models import ServiceCategory
+        self.fields["category_id"].queryset = ServiceCategory.objects.filter(is_active=True)
 
 
 class CustomerProfileSerializer(serializers.ModelSerializer):
@@ -68,6 +85,13 @@ class UserSerializer(serializers.ModelSerializer):
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
+    category_id = serializers.PrimaryKeyRelatedField(
+        queryset=None,  # Will be set in __init__
+        required=False,
+        allow_null=True,
+        write_only=True,
+        help_text="Service category ID for workers (e.g., Electrician, Plumber, HVAC)",
+    )
 
     class Meta:
         model = User
@@ -82,7 +106,14 @@ class RegisterSerializer(serializers.ModelSerializer):
             "default_address",
             "default_latitude",
             "default_longitude",
+            "category_id",
         )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Set queryset for category_id field
+        from services.models import ServiceCategory
+        self.fields["category_id"].queryset = ServiceCategory.objects.filter(is_active=True)
 
     def validate_role(self, value: str) -> str:
         allowed_roles = {User.Role.CUSTOMER, User.Role.WORKER}
@@ -91,8 +122,17 @@ class RegisterSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data: dict[str, Any]) -> User:
+        category_id = validated_data.pop("category_id", None)
         password = validated_data.pop("password")
         user = User.objects.create_user(password=password, **validated_data)
+        
+        # Set category for worker profile if provided during registration
+        if user.role == User.Role.WORKER and category_id:
+            profile = getattr(user, "worker_profile", None)
+            if profile:
+                profile.category = category_id
+                profile.save(update_fields=["category"])
+        
         return user
 
 
@@ -102,6 +142,18 @@ class WorkerAvailabilitySerializer(serializers.Serializer):
     current_longitude = serializers.DecimalField(max_digits=9, decimal_places=6, required=False)
     service_radius_km = serializers.IntegerField(min_value=1, required=False)
     skills = serializers.CharField(required=False, allow_blank=True)
+    category_id = serializers.PrimaryKeyRelatedField(
+        queryset=None,  # Will be set in __init__
+        source="category",
+        required=False,
+        allow_null=True,
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Set queryset for category_id field
+        from services.models import ServiceCategory
+        self.fields["category_id"].queryset = ServiceCategory.objects.filter(is_active=True)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         if attrs.get("is_available"):
@@ -123,6 +175,8 @@ class WorkerAvailabilitySerializer(serializers.Serializer):
             instance.service_radius_km = validated_data["service_radius_km"]
         if "skills" in validated_data:
             instance.skills = validated_data["skills"]
+        if "category" in validated_data:
+            instance.category = validated_data["category"]
         instance.save()
         return instance
 

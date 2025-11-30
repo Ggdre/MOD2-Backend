@@ -64,6 +64,14 @@ class WorkerProfile(models.Model):
         on_delete=models.CASCADE,
         related_name="worker_profile",
     )
+    category = models.ForeignKey(
+        "services.ServiceCategory",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="workers",
+        help_text=_("Worker's primary specialization/category (e.g., Electrician, Plumber, HVAC)"),
+    )
     skills = models.TextField(blank=True)
     is_available = models.BooleanField(default=False)
     service_radius_km = models.PositiveIntegerField(

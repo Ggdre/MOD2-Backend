@@ -56,7 +56,41 @@ class CurrentUserView(generics.RetrieveUpdateAPIView):
         
         # Add worker stats if user is a worker
         if user.is_worker and hasattr(user, 'worker_profile'):
+            from services.models import ServiceRequest
+            from django.utils import timezone
+            from datetime import timedelta
+            
             profile = user.worker_profile
+            
+            # Get active jobs count
+            active_jobs_count = ServiceRequest.objects.filter(
+                worker=user,
+                status__in=[ServiceRequest.Status.ACCEPTED, ServiceRequest.Status.IN_PROGRESS]
+            ).count()
+            
+            # Get completed jobs today
+            today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            completed_today = ServiceRequest.objects.filter(
+                worker=user,
+                status=ServiceRequest.Status.COMPLETED,
+                completed_at__gte=today_start
+            ).count()
+            
+            # Calculate earnings (sum of estimated amounts or you can add a price field later)
+            # For now, we'll use a placeholder calculation or you can add a price field to ServiceRequest
+            # This is a placeholder - you may want to add a price/amount field to ServiceRequest model
+            completed_jobs_today_queryset = ServiceRequest.objects.filter(
+                worker=user,
+                status=ServiceRequest.Status.COMPLETED,
+                completed_at__gte=today_start
+            )
+            # If you have a price field, use: earnings_today = sum(job.price for job in completed_jobs_today_queryset)
+            # For now, using estimated_duration_minutes * rate (example: $10 per hour = $0.167 per minute)
+            earnings_today = sum(
+                (job.estimated_duration_minutes * 0.167) if job.estimated_duration_minutes else 0
+                for job in completed_jobs_today_queryset
+            )
+            
             data['worker_stats'] = {
                 'is_available': profile.is_available,
                 'service_radius_km': profile.service_radius_km,
@@ -65,6 +99,9 @@ class CurrentUserView(generics.RetrieveUpdateAPIView):
                 'average_rating': float(profile.average_rating),
                 'total_completed_jobs': profile.total_completed_jobs,
                 'last_available_at': profile.last_available_at.isoformat() if profile.last_available_at else None,
+                'active_jobs_count': active_jobs_count,
+                'completed_today': completed_today,
+                'earnings_today': round(earnings_today, 2),
             }
         
         # Add customer stats if user is a customer

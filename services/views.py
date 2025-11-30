@@ -311,7 +311,7 @@ class ServiceRequestViewSet(
 
 
 class NearbyJobsView(APIView):
-    """Get nearby jobs within worker's service radius."""
+    """Get nearby jobs within worker's service radius, filtered by worker's category/specialization."""
     permission_classes = [permissions.IsAuthenticated, IsWorker]
 
     def get(self, request):
@@ -340,8 +340,22 @@ class NearbyJobsView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Check if worker has a category set
+        if not profile.category:
+            return Response(
+                {
+                    "detail": "Worker category/specialization not set. Please set your category in your profile to see relevant jobs.",
+                    "error_code": "NO_CATEGORY_SET"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         max_distance = float(profile.service_radius_km)
-        queryset = ServiceRequest.objects.filter(status=ServiceRequest.Status.PENDING)
+        # Filter by worker's category - only show jobs matching worker's specialization
+        queryset = ServiceRequest.objects.filter(
+            status=ServiceRequest.Status.PENDING,
+            category=profile.category  # Filter by worker's category
+        )
         
         distance_map: dict[int, float] = {}
         filtered_ids: list[int] = []
