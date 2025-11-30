@@ -50,6 +50,7 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
             "location_latitude",
             "location_longitude",
             "address",
+            "postcode",
             "scheduled_start",
             "accepted_at",
             "completed_at",
@@ -136,6 +137,7 @@ class ServiceRequestCreateSerializer(serializers.ModelSerializer):
             "location_latitude",
             "location_longitude",
             "address",
+            "postcode",
             "scheduled_start",
             "customer_notes",
             "estimated_duration_minutes",
@@ -145,6 +147,25 @@ class ServiceRequestCreateSerializer(serializers.ModelSerializer):
         request = self.context["request"]
         user: User = request.user
         validated_data["customer"] = user
+        
+        # Auto-fill address and postcode from coordinates if address is not provided or empty
+        location_lat = validated_data.get("location_latitude")
+        location_lng = validated_data.get("location_longitude")
+        address = validated_data.get("address", "").strip()
+        
+        if (not address or address == "") and location_lat and location_lng:
+            from .utils import reverse_geocode
+            try:
+                lat = float(location_lat)
+                lng = float(location_lng)
+                geocode_result = reverse_geocode(lat, lng)
+                if geocode_result.get("address"):
+                    validated_data["address"] = geocode_result["address"]
+                if geocode_result.get("postcode"):
+                    validated_data["postcode"] = geocode_result["postcode"]
+            except (ValueError, TypeError):
+                pass  # If geocoding fails, continue without address
+        
         service_request = super().create(validated_data)
         RequestActivity.objects.create(
             service_request=service_request,

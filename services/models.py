@@ -80,6 +80,7 @@ class ServiceRequest(models.Model):
     location_latitude = models.DecimalField(max_digits=9, decimal_places=6)
     location_longitude = models.DecimalField(max_digits=9, decimal_places=6)
     address = models.CharField(max_length=255, blank=True)
+    postcode = models.CharField(max_length=20, blank=True, help_text=_("Postal code extracted from address"))
     scheduled_start = models.DateTimeField(null=True, blank=True)
     accepted_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)

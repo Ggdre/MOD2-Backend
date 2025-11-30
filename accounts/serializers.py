@@ -113,6 +113,23 @@ class RegisterSerializer(serializers.ModelSerializer):
     def create(self, validated_data: dict[str, Any]) -> User:
         category_id = validated_data.pop("category_id", None)
         password = validated_data.pop("password")
+        
+        # Auto-fill default_address from coordinates if address is not provided
+        default_lat = validated_data.get("default_latitude")
+        default_lng = validated_data.get("default_longitude")
+        default_address = validated_data.get("default_address", "").strip()
+        
+        if (not default_address or default_address == "") and default_lat and default_lng:
+            from services.utils import reverse_geocode
+            try:
+                lat = float(default_lat)
+                lng = float(default_lng)
+                geocode_result = reverse_geocode(lat, lng)
+                if geocode_result.get("address"):
+                    validated_data["default_address"] = geocode_result["address"]
+            except (ValueError, TypeError):
+                pass  # If geocoding fails, continue without address
+        
         user = User.objects.create_user(password=password, **validated_data)
         
         # Set category for worker profile if provided during registration
