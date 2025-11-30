@@ -45,12 +45,26 @@ def create_notification(
 
 
 def _eligible_worker_profiles(service_request: ServiceRequest) -> Iterable[WorkerProfile]:
-    return WorkerProfile.objects.filter(
-        is_available=True,
+    """Get worker profiles eligible to receive notifications for a service request.
+    
+    Filters by:
+    - is_available=True (only online workers)
+    - Has location coordinates
+    - Active user account
+    - Worker category matches request category (if request has category)
+    """
+    queryset = WorkerProfile.objects.filter(
+        is_available=True,  # Only online workers receive notifications
         current_latitude__isnull=False,
         current_longitude__isnull=False,
         user__is_active=True,
-    ).select_related("user")
+    )
+    
+    # Filter by category if the service request has a category
+    if service_request.category:
+        queryset = queryset.filter(category=service_request.category)
+    
+    return queryset.select_related("user")
 
 
 def notify_workers_of_request(service_request: ServiceRequest) -> NotificationResult:
