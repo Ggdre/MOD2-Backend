@@ -25,9 +25,7 @@ class WorkerProfileSerializer(serializers.ModelSerializer):
     user = serializers.SerializerMethodField()
 
     def get_user(self, obj):
-        # Import here to avoid circular reference
-        from accounts.serializers import UserSerializer
-        # Use a simplified version to avoid infinite recursion
+        # Return simplified user data to avoid circular reference with UserSerializer
         return {
             "id": obj.user.id,
             "email": obj.user.email,

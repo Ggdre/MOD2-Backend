@@ -40,8 +40,8 @@ class ServiceRequestViewSet(
         )
         user: User = self.request.user
 
-        if self.action in {"retrieve"} and user.role == User.Role.WORKER:
-            # Workers can view requests assigned to them or pending ones to evaluate
+        if self.action in {"retrieve", "accept", "decline"} and user.role == User.Role.WORKER:
+            # Workers can view/accept/decline requests assigned to them or pending ones to evaluate
             return queryset.filter(Q(worker=user) | Q(status=ServiceRequest.Status.PENDING))
 
         if user.role == User.Role.ADMIN:
@@ -136,7 +136,7 @@ class ServiceRequestViewSet(
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated, IsWorker])
     def accept(self, request, pk=None):
-        service_request = ServiceRequest.objects.select_related("customer", "category").get(pk=pk)
+        service_request = self.get_object()
         if service_request.status != ServiceRequest.Status.PENDING:
             return Response({"detail": "Request is no longer available."}, status=status.HTTP_400_BAD_REQUEST)
         serializer = ServiceRequestStatusSerializer(data=request.data, context={"request": request})
