@@ -348,6 +348,27 @@ class ServiceRequestViewSet(
             "message": "Cancelled for you"
         }, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated, IsWorker])
+    def declined(self, request):
+        """Get all jobs that the worker has declined."""
+        from .models import WorkerJobDecline
+        
+        declined_records = WorkerJobDecline.objects.filter(
+            worker=request.user
+        ).select_related("service_request__customer", "service_request__category", "service_request__worker")
+        
+        declined_jobs = [record.service_request for record in declined_records]
+        
+        serializer = ServiceRequestSerializer(declined_jobs, many=True, context={"request": request})
+        
+        # Add decline reason and date to each job
+        result_data = serializer.data
+        for i, record in enumerate(declined_records):
+            result_data[i]["decline_reason"] = record.reason
+            result_data[i]["declined_at"] = record.created_at.isoformat()
+        
+        return Response(result_data)
+
 
 class NearbyJobsView(APIView):
     """Get nearby jobs within worker's service radius, filtered by worker's category/specialization and location."""
