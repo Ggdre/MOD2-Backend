@@ -22,7 +22,21 @@ class WorkerProfileSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     category_name = serializers.CharField(source="category.name", read_only=True)
-    user = UserSerializer(read_only=True)
+    user = serializers.SerializerMethodField()
+
+    def get_user(self, obj):
+        # Import here to avoid circular reference
+        from accounts.serializers import UserSerializer
+        # Use a simplified version to avoid infinite recursion
+        return {
+            "id": obj.user.id,
+            "email": obj.user.email,
+            "first_name": obj.user.first_name,
+            "last_name": obj.user.last_name,
+            "role": obj.user.role,
+            "phone_number": obj.user.phone_number,
+            "is_active": obj.user.is_active,
+        }
 
     class Meta:
         model = WorkerProfile
