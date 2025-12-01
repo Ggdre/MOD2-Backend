@@ -26,6 +26,11 @@ def get_pending_requests_for_worker(worker: User) -> Tuple[Iterable[ServiceReque
     max_distance = float(profile.service_radius_km)
 
     queryset = ServiceRequest.objects.filter(status=ServiceRequest.Status.PENDING)
+    
+    # Exclude jobs the worker has declined
+    from .models import WorkerJobDecline
+    declined_ids = WorkerJobDecline.objects.filter(worker=worker).values_list('service_request_id', flat=True)
+    queryset = queryset.exclude(id__in=declined_ids)
 
     distance_map: dict[int, float] = {}
     filtered_ids: list[int] = []
