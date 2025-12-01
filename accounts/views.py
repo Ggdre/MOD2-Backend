@@ -170,3 +170,31 @@ class WorkerStatusView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.update(profile, serializer.validated_data)
         return Response(WorkerProfileSerializer(profile, context={"request": request}).data)
+
+
+class LogoutView(APIView):
+    """Logout endpoint that blacklists the refresh token."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            refresh_token = request.data.get("refresh")
+            if refresh_token:
+                token = RefreshToken(refresh_token)
+                try:
+                    token.blacklist()
+                except AttributeError:
+                    # If blacklist is not available, just return success
+                    # The token will expire naturally
+                    pass
+                return Response({"detail": "Successfully logged out."}, status=status.HTTP_200_OK)
+            else:
+                return Response(
+                    {"detail": "Refresh token is required."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except Exception as e:
+            return Response(
+                {"detail": f"Error logging out: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )

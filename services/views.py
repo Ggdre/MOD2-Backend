@@ -309,15 +309,57 @@ class ServiceRequestViewSet(
         response_serializer = ServiceRequestSerializer(service_request, context={"request": request})
         return Response(response_serializer.data)
 
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated, IsWorker])
+    def decline(self, request, pk=None):
+        """Worker declines/expresses not interested in a job."""
+        service_request = self.get_object()
+        
+        if service_request.status != ServiceRequest.Status.PENDING:
+            return Response(
+                {"detail": "Only pending requests can be declined."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        from .models import WorkerJobDecline
+        reason = request.data.get("reason", "")
+        
+        # Create or get existing decline record
+        decline, created = WorkerJobDecline.objects.get_or_create(
+            worker=request.user,
+            service_request=service_request,
+            defaults={"reason": reason}
+        )
+        
+        if not created:
+            # Update reason if already declined
+            decline.reason = reason
+            decline.save(update_fields=["reason"])
+        
+        # Create activity log
+        from .models import RequestActivity
+        RequestActivity.objects.create(
+            service_request=service_request,
+            actor=request.user,
+            message=f"Declined by {request.user.email}. Reason: {reason if reason else 'Not interested'}",
+        )
+        
+        return Response({
+            "detail": "Job declined. This job will no longer appear in your search results.",
+            "message": "Cancelled for you"
+        }, status=status.HTTP_200_OK)
+
 
 class NearbyJobsView(APIView):
-    """Get nearby jobs within worker's service radius, filtered by worker's category/specialization."""
+    """Get nearby jobs within worker's service radius, filtered by worker's category/specialization and location."""
     permission_classes = [permissions.IsAuthenticated, IsWorker]
 
     def get(self, request):
         lat = request.query_params.get("lat")
         lng = request.query_params.get("lng")
+        category_id = request.query_params.get("category_id")
+        max_distance_km = request.query_params.get("max_distance_km")
         
+        # Location is required
         if not lat or not lng:
             return Response(
                 {"detail": "Both 'lat' and 'lng' query parameters are required."},
@@ -340,22 +382,38 @@ class NearbyJobsView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Check if worker has a category set
-        if not profile.category:
-            return Response(
-                {
-                    "detail": "Worker category/specialization not set. Please set your category in your profile to see relevant jobs.",
-                    "error_code": "NO_CATEGORY_SET"
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # Use provided max_distance or worker's service radius
+        if max_distance_km:
+            try:
+                max_distance = float(max_distance_km)
+            except ValueError:
+                return Response(
+                    {"detail": "Invalid max_distance_km value."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            max_distance = float(profile.service_radius_km)
         
-        max_distance = float(profile.service_radius_km)
-        # Filter by worker's category - only show jobs matching worker's specialization
-        queryset = ServiceRequest.objects.filter(
-            status=ServiceRequest.Status.PENDING,
-            category=profile.category  # Filter by worker's category
-        )
+        # Start with pending jobs
+        queryset = ServiceRequest.objects.filter(status=ServiceRequest.Status.PENDING)
+        
+        # Filter by category if provided, otherwise use worker's category
+        if category_id:
+            try:
+                category_id = int(category_id)
+                queryset = queryset.filter(category_id=category_id)
+            except (ValueError, TypeError):
+                return Response(
+                    {"detail": "Invalid category_id."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        elif profile.category:
+            queryset = queryset.filter(category=profile.category)
+        
+        # Exclude jobs the worker has declined
+        from .models import WorkerJobDecline
+        declined_ids = WorkerJobDecline.objects.filter(worker=request.user).values_list('service_request_id', flat=True)
+        queryset = queryset.exclude(id__in=declined_ids)
         
         distance_map: dict[int, float] = {}
         filtered_ids: list[int] = []
@@ -385,6 +443,104 @@ class NearbyJobsView(APIView):
             "distance_map": distance_map,
         }
         serializer = ServiceRequestSerializer(filtered_queryset, many=True, context=context)
+        return Response(serializer.data)
+
+
+class SearchWorkersView(APIView):
+    """Search for workers with filtering by rating, category, and location. Only shows active worker profiles."""
+    permission_classes = [permissions.IsAuthenticated, IsCustomer]
+
+    def get(self, request):
+        from accounts.models import WorkerProfile
+        from accounts.serializers import WorkerProfileSerializer
+        
+        # Get query parameters
+        category_id = request.query_params.get("category_id")
+        min_rating = request.query_params.get("min_rating")
+        lat = request.query_params.get("lat")
+        lng = request.query_params.get("lng")
+        max_distance_km = request.query_params.get("max_distance_km")
+        
+        # Start with active worker profiles only (using user.is_active)
+        queryset = WorkerProfile.objects.filter(
+            user__is_active=True,
+        ).select_related("user", "category")
+        
+        # Filter by category if provided
+        if category_id:
+            try:
+                category_id = int(category_id)
+                queryset = queryset.filter(category_id=category_id)
+            except (ValueError, TypeError):
+                return Response(
+                    {"detail": "Invalid category_id."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Filter by minimum rating if provided
+        if min_rating:
+            try:
+                min_rating = float(min_rating)
+                if min_rating < 0 or min_rating > 5:
+                    return Response(
+                        {"detail": "min_rating must be between 0 and 5."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                queryset = queryset.filter(average_rating__gte=min_rating)
+            except (ValueError, TypeError):
+                return Response(
+                    {"detail": "Invalid min_rating value."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Filter by location if provided
+        if lat and lng:
+            try:
+                search_lat = float(lat)
+                search_lng = float(lng)
+                max_distance = float(max_distance_km) if max_distance_km else 50.0  # Default 50km
+                
+                from .utils import haversine_km
+                
+                # Filter workers within distance
+                filtered_profiles = []
+                for profile in queryset:
+                    if profile.current_latitude and profile.current_longitude:
+                        distance = haversine_km(
+                            search_lat,
+                            search_lng,
+                            float(profile.current_latitude),
+                            float(profile.current_longitude),
+                        )
+                        if distance <= max_distance:
+                            # Add distance to profile for sorting
+                            profile.distance_km = distance
+                            filtered_profiles.append(profile)
+                
+                # Sort by distance
+                filtered_profiles.sort(key=lambda p: getattr(p, 'distance_km', float('inf')))
+                
+                # Serialize with distance
+                serializer = WorkerProfileSerializer(filtered_profiles, many=True, context={"request": request})
+                data = serializer.data
+                
+                # Add distance to each result
+                for i, profile in enumerate(filtered_profiles):
+                    if hasattr(profile, 'distance_km'):
+                        data[i]['distance_km'] = round(profile.distance_km, 2)
+                
+                return Response(data)
+            except (ValueError, TypeError):
+                return Response(
+                    {"detail": "Invalid latitude or longitude values."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # If no location filter, just return all matching workers
+        # Order by rating and completed jobs
+        queryset = queryset.order_by("-average_rating", "-total_completed_jobs")
+        
+        serializer = WorkerProfileSerializer(queryset, many=True, context={"request": request})
         return Response(serializer.data)
 
 

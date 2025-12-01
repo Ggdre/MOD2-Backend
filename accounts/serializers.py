@@ -22,11 +22,13 @@ class WorkerProfileSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     category_name = serializers.CharField(source="category.name", read_only=True)
+    user = UserSerializer(read_only=True)
 
     class Meta:
         model = WorkerProfile
         fields = (
             "id",
+            "user",
             "category_id",
             "category_name",
             "skills",

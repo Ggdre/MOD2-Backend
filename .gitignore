@@ -4,7 +4,7 @@ __pycache__/
 *.pyo
 *.pyd
 *.sqlite3
-db.sqlite3
+Docummentations/db.sqlite3
 *.log
 staticfiles/
 media/
@@ -18,15 +18,16 @@ frontend/
 # Design and documentation files
 *.md
 *.html
-MOBILE_APP_DESIGN.md
-CUSTOMER_MOBILE_APP_DESIGN.md
-API_IMPLEMENTATION_SUMMARY.md
-CUSTOMER_API_IMPLEMENTATION_SUMMARY.md
-WORKER_TRACKING_FEATURE.md
-DESIGN_VIEWER_README.md
+Docummentations/MOBILE_APP_DESIGN.md
+Docummentations/CUSTOMER_MOBILE_APP_DESIGN.md
+Docummentations/API_IMPLEMENTATION_SUMMARY.md
+Docummentations/CUSTOMER_API_IMPLEMENTATION_SUMMARY.md
+Docummentations/WORKER_TRACKING_FEATURE.md
+Docummentations/DESIGN_VIEWER_README.md
 mobile_app_design_viewer.html
 
 # IDE files
 .idea/
 .vscode/
 
+/Docummentations/

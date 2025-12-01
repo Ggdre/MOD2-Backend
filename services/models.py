@@ -167,3 +167,29 @@ class RequestActivity(models.Model):
 
     def __str__(self) -> str:
         return f"{self.service_request.reference_code}: {self.message[:50]}"
+
+
+class WorkerJobDecline(models.Model):
+    """Track jobs that workers have declined/expressed not interested in."""
+    worker = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="declined_jobs",
+        on_delete=models.CASCADE,
+    )
+    service_request = models.ForeignKey(
+        ServiceRequest,
+        related_name="declined_by_workers",
+        on_delete=models.CASCADE,
+    )
+    reason = models.TextField(blank=True, help_text=_("Optional reason for declining"))
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("worker", "service_request")]
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=("worker", "service_request")),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.worker.email} declined {self.service_request.reference_code}"

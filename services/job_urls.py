@@ -12,6 +12,7 @@ urlpatterns = [
     path("active/", ServiceRequestViewSet.as_view({"get": "active"}), name="active"),
     path("completed/", ServiceRequestViewSet.as_view({"get": "completed"}), name="completed"),
     path("<int:pk>/accept/", ServiceRequestViewSet.as_view({"post": "accept"}), name="accept"),
+    path("<int:pk>/decline/", ServiceRequestViewSet.as_view({"post": "decline"}), name="decline"),
     path("<int:pk>/update-location/", ServiceRequestViewSet.as_view({"post": "update_location"}), name="update-location"),
 ]
 

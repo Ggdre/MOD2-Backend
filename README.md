@@ -53,6 +53,27 @@ Update your `.env` (or Render environment) with:
 - Ensure the PostgreSQL URL includes `sslmode=require` for Aiven-hosted instances
 - Add migrations during deployment (`render` will run `python manage.py migrate` automatically if configured)
 
+### React Frontend Tester (`frontend/`)
+- Vite + React app for verifying backend flows (login, request submission, worker dashboard, admin metrics)
+- React Router, React Query, Axios + Auth context with JWT storage
+
+```bash
+cd frontend
+cp env.example .env        # update VITE_API_BASE_URL if needed
+npm install
+npm run dev                # start local dev server (default http://localhost:5173)
+
+# optional: verify production build
+npm run build
+```
+
+Key routes:
+- `/login` / `/register` – obtain JWT tokens and persist them locally
+- `/` – dashboard that adapts to the logged-in role (customer, worker, admin)
+
+Environment variable:
+- `VITE_API_BASE_URL` – points to the deployed backend (Render URL or `http://127.0.0.1:8000`)
+
 ### API Highlights
 - `POST /api/auth/register/` – customer/worker registration (JWT response)
 - `POST /api/auth/login/` – JWT pair
