@@ -309,6 +309,29 @@ class ServiceRequestViewSet(
         response_serializer = ServiceRequestSerializer(service_request, context={"request": request})
         return Response(response_serializer.data)
 
+    @action(detail=True, methods=["delete"], permission_classes=[permissions.IsAuthenticated, IsCustomer])
+    def cancel2(self, request, pk=None):
+        """Customer can delete their own request."""
+        service_request = self.get_object()
+        
+        # Verify it's the customer's own request
+        if service_request.customer != request.user:
+            return Response(
+                {"detail": "You can only delete your own requests."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Store reference code for response
+        reference_code = service_request.reference_code
+        
+        # Delete the request
+        service_request.delete()
+        
+        return Response(
+            {"detail": f"Request {reference_code} has been deleted successfully."},
+            status=status.HTTP_200_OK
+        )
+
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated, IsWorker])
     def decline(self, request, pk=None):
         """Worker declines/expresses not interested in a job."""

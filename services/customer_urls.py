@@ -8,6 +8,7 @@ urlpatterns = [
     path("requests/active/", ServiceRequestViewSet.as_view({"get": "my_active"}), name="active-requests"),
     path("requests/completed/", ServiceRequestViewSet.as_view({"get": "my_completed"}), name="completed-requests"),
     path("requests/pending/", ServiceRequestViewSet.as_view({"get": "my_pending"}), name="pending-requests"),
+    path("requests/<int:pk>/cancel2/", ServiceRequestViewSet.as_view({"delete": "cancel2"}), name="cancel2-request"),
     path("workers/search/", SearchWorkersView.as_view(), name="search-workers"),
 ]
 
