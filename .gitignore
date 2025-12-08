@@ -26,6 +26,10 @@ Docummentations/WORKER_TRACKING_FEATURE.md
 Docummentations/DESIGN_VIEWER_README.md
 mobile_app_design_viewer.html
 
+# ERD files
+ERD_*.xml
+ERD_*.txt
+
 # IDE files
 .idea/
 .vscode/

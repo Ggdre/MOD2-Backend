@@ -198,3 +198,61 @@ class LogoutView(APIView):
                 {"detail": f"Error logging out: {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+
+class DeleteUserView(APIView):
+    """Delete user account endpoint. Users can only delete their own account."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request):
+        """
+        Delete the authenticated user's account.
+        
+        This will:
+        - Delete the user and all related data (profiles, notifications, etc.)
+        - Cascade delete service requests where user is the customer
+        - Set worker to NULL on service requests where user is the worker
+        - Delete declined jobs, notifications, and other related records
+        """
+        user = request.user
+        
+        # Check for active service requests as a customer
+        from services.models import ServiceRequest
+        active_customer_requests = ServiceRequest.objects.filter(
+            customer=user,
+            status__in=[
+                ServiceRequest.Status.PENDING,
+                ServiceRequest.Status.ACCEPTED,
+                ServiceRequest.Status.IN_PROGRESS
+            ]
+        ).count()
+        
+        # Check for active service requests as a worker
+        active_worker_requests = ServiceRequest.objects.filter(
+            worker=user,
+            status__in=[
+                ServiceRequest.Status.ACCEPTED,
+                ServiceRequest.Status.IN_PROGRESS
+            ]
+        ).count()
+        
+        # Store user email for response (before deletion)
+        user_email = user.email
+        
+        # Delete the user (Django will handle cascading deletes)
+        # Note: This will also delete:
+        # - WorkerProfile/CustomerProfile (CASCADE)
+        # - ServiceRequests where user is customer (CASCADE)
+        # - Notifications (CASCADE)
+        # - WorkerJobDecline records (CASCADE)
+        # - ServiceRequests where user is worker will have worker set to NULL (SET_NULL)
+        user.delete()
+        
+        return Response(
+            {
+                "detail": f"Account {user_email} has been successfully deleted.",
+                "deleted_active_customer_requests": active_customer_requests,
+                "deleted_active_worker_requests": active_worker_requests,
+            },
+            status=status.HTTP_200_OK
+        )
